@@ -85,7 +85,7 @@ class PolicyNetwork(object):
         # Add epsilon to avoid taking the log of 0 in following step
         output = tf.nn.softmax(tf.reshape(h_conv_final, [-1, go.N ** 2]) + b_conv_final) + tf.constant(EPSILON)
 
-        log_likelihood_cost = -tf.reduce_mean(tf.reduce_sum(tf.mul(tf.log(output), y), reduction_indices=[1]))
+        log_likelihood_cost = -tf.reduce_mean(tf.reduce_sum(tf.multiply(tf.log(output), y), reduction_indices=[1]))
 
         # The step size was initialized to 0.003 and was halved every 80 million training steps
         _learning_rate = tf.train.exponential_decay(3e-3, global_step,
@@ -94,13 +94,13 @@ class PolicyNetwork(object):
         was_correct = tf.equal(tf.argmax(output, 1), tf.argmax(y, 1))
         accuracy = tf.reduce_mean(tf.cast(was_correct, tf.float32))
 
-        weight_summaries = tf.merge_summary([
-            tf.histogram_summary(weight_var.name, weight_var)
+        weight_summaries = tf.summary.merge([
+            tf.summary.histogram(weight_var.name, weight_var)
             for weight_var in [W_conv_init] +  W_conv_intermediate + [W_conv_final, b_conv_final]],
             name="weight_summaries"
         )
-        activation_summaries = tf.merge_summary([
-            tf.histogram_summary(act_var.name, act_var)
+        activation_summaries = tf.summary.merge([
+            tf.summary.histogram(act_var.name, act_var)
             for act_var in [h_conv_init] + h_conv_intermediate + [h_conv_final]],
             name="activation_summaries"
         )
@@ -112,8 +112,8 @@ class PolicyNetwork(object):
                 setattr(self, name, thing)
 
     def initialize_logging(self, tensorboard_logdir):
-        self.test_summary_writer = tf.train.SummaryWriter(os.path.join(tensorboard_logdir, "test"), self.session.graph)
-        self.training_summary_writer = tf.train.SummaryWriter(os.path.join(tensorboard_logdir, "training"), self.session.graph)
+        self.test_summary_writer = tf.summary.FileWriter(os.path.join(tensorboard_logdir, "test"), self.session.graph)
+        self.training_summary_writer = tf.summary.FileWriter(os.path.join(tensorboard_logdir, "training"), self.session.graph)
 
     def initialize_variables(self, save_file=None):
         if save_file is None:
@@ -129,6 +129,9 @@ class PolicyNetwork(object):
 
     def train(self, training_data, batch_size=32):
         num_minibatches = training_data.data_size // batch_size
+        if num_minibatches == 0:
+            return
+
         for i in range(num_minibatches):
             batch_x, batch_y = training_data.get_batch(batch_size)
             _, accuracy, cost = self.session.run(
@@ -184,9 +187,9 @@ class StatisticsCollector(object):
     with tf.device("/cpu:0"):
         accuracy = tf.placeholder(tf.float32, [])
         cost = tf.placeholder(tf.float32, [])
-        accuracy_summary = tf.scalar_summary("accuracy", accuracy)
-        cost_summary = tf.scalar_summary("log_likelihood_cost", cost)
-        accuracy_summaries = tf.merge_summary([accuracy_summary, cost_summary], name="accuracy_summaries")
+        accuracy_summary = tf.summary.scalar("accuracy", accuracy)
+        cost_summary = tf.summary.scalar("log_likelihood_cost", cost)
+        accuracy_summaries = tf.summary.merge([accuracy_summary, cost_summary], name="accuracy_summaries")
     session = tf.Session()
 
     def __init__(self):

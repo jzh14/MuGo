@@ -39,6 +39,7 @@ def gtp(strategy, read_file=None):
             sys.stdout.write(engine_reply)
             sys.stdout.flush()
 
+
 def preprocess(*data_sets, processed_dir="processed_data"):
     processed_dir = os.path.join(os.getcwd(), processed_dir)
     if not os.path.isdir(processed_dir):
