@@ -5,3 +5,4 @@ processed_data
 models
 logs
 __pycache__
+.idea
