@@ -7,8 +7,10 @@ import gtp
 
 import go
 import utils
-from features import DEFAULT_FEATURES
+
 from policy import PolicyNetwork
+from features import DEFAULT_FEATURES
+import copy
 
 def sorted_moves(probability_array):
     coords = [(a, b) for a in range(go.N) for b in range(go.N)]
@@ -24,6 +26,30 @@ def translate_gtp_colors(gtp_color):
 
 def is_move_reasonable(position, move):
     return position.is_move_legal(move) and go.is_eyeish(position.board, move) != position.to_play
+
+def select_most_likely(position, move_probabilities):
+    for move in sorted_moves(move_probabilities):
+        if is_move_reasonable(position, move):
+            return move
+    return None
+
+def select_weighted_random(position, move_probabilities):
+    selection = random.random()
+    selected_move = None
+    current_probability = 0
+    # technically, don't have to sort in order to correctly simulate a random
+    # draw, but it cuts down on how many additions we do.
+    for move, move_prob in np.ndenumerate(move_probabilities):
+        current_probability += move_prob
+        if current_probability > selection:
+            selected_move = move
+            break
+    if is_move_reasonable(position, selected_move):
+        return selected_move
+    else:
+        # fallback in case the selected move was illegal
+        return select_most_likely(position, move_probabilities)
+
 
 class GtpInterface(object):
     def __init__(self):
@@ -72,8 +98,8 @@ class RandomPlayer(GtpInterface):
         return None
 
 class PolicyNetworkBestMovePlayer(GtpInterface):
-    def __init__(self, read_file):
-        self.policy_network = PolicyNetwork(DEFAULT_FEATURES.planes, use_cpu=True)
+    def __init__(self, policy_network, read_file):
+        self.policy_network = policy_network
         self.read_file = read_file
         super().__init__()
 
@@ -87,14 +113,33 @@ class PolicyNetworkBestMovePlayer(GtpInterface):
         self.policy_network.initialize_variables(self.read_file)
 
     def suggest_move(self, position):
-        if position.recent and position.n > 100 and position.recent[-1] == None:
+        if position.recent and position.n > 100 and position.recent[-1].move == None:
             # Pass if the opponent passes
             return None
         move_probabilities = self.policy_network.run(position)
-        for move in sorted_moves(move_probabilities):
-            if position.is_move_legal(move):
-                return move
-        return None
+        return select_most_likely(position, move_probabilities)
+
+class PolicyNetworkRandomMovePlayer(GtpInterface):
+    def __init__(self, policy_network, read_file):
+        self.policy_network = policy_network
+        self.read_file = read_file
+        super().__init__()
+
+    def clear(self):
+        super().clear()
+        self.refresh_network()
+
+    def refresh_network(self):
+        # Ensure that the player is using the latest version of the network
+        # so that the network can be continually trained even as it's playing.
+        self.policy_network.initialize_variables(self.read_file)
+
+    def suggest_move(self, position):
+        if position.recent and position.n > 100 and position.recent[-1].move == None:
+            # Pass if the opponent passes
+            return None
+        move_probabilities = self.policy_network.run(position)
+        return select_weighted_random(position, move_probabilities)
 
 # Exploration constant
 c_PUCT = 5
@@ -130,7 +175,7 @@ class MCTSNode():
 
     @property
     def action_score(self):
-        # Note to self: after adding value network, must calculate 
+        # Note to self: after adding value network, must calculate
         # self.Q = weighted_average(avg(values), avg(rollouts)),
         # as opposed to avg(map(weighted_average, values, rollouts))
         return self.Q + self.U
@@ -139,7 +184,7 @@ class MCTSNode():
         return self.position is not None
 
     def compute_position(self):
-        self.position = self.parent.position.play_move(self.move)
+        self.position = self.parent.position.play_move(self.parent.position.to_play, self.move)
         return self.position
 
     def expand(self, move_probabilities):
@@ -170,9 +215,9 @@ class MCTSNode():
 
 class MCTS(GtpInterface):
     def __init__(self, read_file, seconds_per_move=5):
+        self.policy_network = PolicyNetwork(DEFAULT_FEATURES.planes, use_cpu=True)
         self.seconds_per_move = seconds_per_move
         self.max_rollout_depth = go.N * go.N * 3
-        self.policy_network = PolicyNetwork(DEFAULT_FEATURES.planes, use_cpu=True)
         self.read_file = read_file
         super().__init__()
 
@@ -212,16 +257,16 @@ class MCTS(GtpInterface):
         move_probs = self.policy_network.run(position)
         chosen_leaf.expand(move_probs)
         # evaluation
-        value = self.estimate_value(chosen_leaf)
+        value = self.estimate_value(root, chosen_leaf)
         # backup
         print("value: %s" % value, file=sys.stderr)
         chosen_leaf.backup_value(value)
 
-    def estimate_value(self, chosen_leaf):
+    def estimate_value(self, root, chosen_leaf):
         # Estimate value of position using rollout only (for now).
         # (TODO: Value network; average the value estimations from rollout + value network)
         leaf_position = chosen_leaf.position
-        current = leaf_position
+        current = copy.deepcopy(leaf_position)
         while current.n < self.max_rollout_depth:
             move_probs = self.policy_network.run(current)
             current = self.play_valid_move(current, move_probs)
@@ -230,14 +275,17 @@ class MCTS(GtpInterface):
         else:
             print("max rollout depth exceeded!", file=sys.stderr)
 
-        perspective = 1 if leaf_position.player1turn else -1
+        perspective = 1 if leaf_position.to_play == root.position.to_play else -1
         return current.score() * perspective
 
     def play_valid_move(self, position, move_probs):
         for move in sorted_moves(move_probs):
             if go.is_eyeish(position.board, move):
                 continue
-            candidate_pos = position.play_move(move, mutate=True)
-            if candidate_pos is not None:
+            try:
+                candidate_pos = position.play_move(position.to_play, move, mutate=True)
+            except go.IllegalMove:
+                continue
+            else:
                 return candidate_pos
         return position.pass_move(mutate=True)
