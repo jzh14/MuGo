@@ -7,6 +7,7 @@ import gtp
 
 import go
 import utils
+import copy
 
 def sorted_moves(probability_array):
     coords = [(a, b) for a in range(go.N) for b in range(go.N)]

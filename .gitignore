@@ -2,3 +2,7 @@ lib
 bin
 data
 processed_data
+models
+logs
+__pycache__
+.idea
