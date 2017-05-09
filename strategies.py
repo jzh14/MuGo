@@ -98,8 +98,8 @@ class RandomPlayer(GtpInterface):
         return None
 
 class PolicyNetworkBestMovePlayer(GtpInterface):
-    def __init__(self, policy_network, read_file):
-        self.policy_network = policy_network
+    def __init__(self, read_file):
+        self.policy_network = PolicyNetwork(DEFAULT_FEATURES.planes, use_cpu=True)
         self.read_file = read_file
         super().__init__()
 
